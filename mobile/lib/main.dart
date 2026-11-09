@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'room_screen.dart';
+import 'network_status_screen.dart';
 
 const bg=Color(0xff0B1020),panel=Color(0xff18213A),purple=Color(0xff8556F5),cyan=Color(0xff18D0E4);
 void main(){WidgetsFlutterBinding.ensureInitialized();runApp(const NovaLive());}
@@ -28,6 +29,10 @@ class _AuthScreenState extends State<AuthScreen>{
  @override void dispose(){name.dispose();email.dispose();password.dispose();super.dispose();}
  Future<void>submit()async{
   if(register&&!adult){errorToast(context,'You must be 18 or older.');return;}
+  if(register && name.text.trim().length<2){errorToast(context,'নাম কমপক্ষে ২ অক্ষর লিখুন।');return;}
+  if(!email.text.contains('@')||!email.text.contains('.')){errorToast(context,'সঠিক Email লিখুন।');return;}
+  if(password.text.length<10){errorToast(context,'পাসওয়ার্ড কমপক্ষে ১০ অক্ষরের হতে হবে।');return;}
+  if(busy)return;
   setState(()=>busy=true);
   try{if(register){await widget.api.register(name.text.trim(),email.text.trim(),password.text);}else{await widget.api.login(email.text.trim(),password.text);}widget.onSuccess();}
   catch(e){if(mounted)errorToast(context,e);}finally{if(mounted)setState(()=>busy=false);}
@@ -38,7 +43,7 @@ class _AuthScreenState extends State<AuthScreen>{
   TextField(controller:email,keyboardType:TextInputType.emailAddress,decoration:const InputDecoration(labelText:'Email address')),const SizedBox(height:13),
   TextField(controller:password,obscureText:true,decoration:const InputDecoration(labelText:'Password (10+ characters)')),const SizedBox(height:10),
   if(register)CheckboxListTile(value:adult,onChanged:(v)=>setState(()=>adult=v??false),title:const Text('I confirm I am 18 or older',style:TextStyle(fontSize:14)),controlAffinity:ListTileControlAffinity.leading,contentPadding:EdgeInsets.zero),const SizedBox(height:12),
-  fullButton(busy?'Connecting...':register?'Create account':'Sign in',busy?(){}:submit),const SizedBox(height:12),TextButton(onPressed:()=>setState(()=>register=!register),child:Text(register?'Already have an account? Sign in':'New here? Create an account')),
+  fullButton(busy?'Connecting...':register?'Create account':'Sign in',busy?(){}:submit),const SizedBox(height:12),TextButton(onPressed:()=>setState(()=>register=!register),child:Text(register?'Already have an account? Sign in':'New here? Create an account')),const SizedBox(height:8),OutlinedButton.icon(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>NetworkStatusScreen(api:widget.api))),icon:const Icon(Icons.wifi_find),label:const Text('Server Connection Test')),
   const SizedBox(height:8),const Text('Community standards: consent, respect, and zero tolerance for harassment.',textAlign:TextAlign.center,style:TextStyle(color:Colors.white54,fontSize:12))
  ]))))));
 }
@@ -72,7 +77,7 @@ class _PeoplePageState extends State<PeoplePage>{List<Map<String,dynamic>> peopl
  Future<void>load()async{try{final j=await widget.api.get('/people');if(mounted)setState(()=>people=(j['people'] as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList());}catch(e){if(mounted)errorToast(context,e);}finally{if(mounted)setState(()=>loading=false);}}
  Future<void>call(Map<String,dynamic>p)async{try{final j=await widget.api.post('/calls',{'targetId':p['id']});if(mounted)Navigator.push(context,MaterialPageRoute(builder:(_)=>OutgoingCallScreen(api:widget.api,callId:'${j['call']['id']}',person:'${p['name']}')));}catch(e){if(mounted)errorToast(context,e);}}
  Future<void>gift(Map<String,dynamic>p)async{
-  final selected=await showModalBottomSheet<String>(context:context,showDragHandle:true,builder:(_)=>SafeArea(child:Column(mainAxisSize:MainAxisSize.min,children:[const Text('Send a gift',style:TextStyle(fontSize:20,fontWeight:FontWeight.bold)),for(final g in const [('🌹 Rose','rose','10'),('⭐ Star','star','50'),('❤️ Heart','heart','100'),('👑 Crown','crown','500')])ListTile(title:Text(g.$1),trailing:Text('${g.$2} coins'),onTap:()=>Navigator.pop(context,g.$3))])));
+  final selected=await showModalBottomSheet<String>(context:context,showDragHandle:true,builder:(_)=>SafeArea(child:Column(mainAxisSize:MainAxisSize.min,children:[const Text('Send a gift',style:TextStyle(fontSize:20,fontWeight:FontWeight.bold)),for(final g in const [('🌹 Rose','rose','10'),('⭐ Star','star','50'),('❤️ Heart','heart','100'),('👑 Crown','crown','500')])ListTile(title:Text(g.$1),trailing:Text('${g.$3} coins'),onTap:()=>Navigator.pop(context,g.$2))])));
   if(selected==null)return;
   try{await widget.api.post('/gifts',{'recipientId':p['id'],'giftKey':selected});if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Gift sent')));}catch(e){if(mounted)errorToast(context,e);}
  }
