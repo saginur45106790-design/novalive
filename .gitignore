@@ -1,0 +1,8 @@
+.DS_Store
+.env
+*.keystore
+*.jks
+**/node_modules/
+**/build/
+**/.dart_tool/
+**/.flutter-plugins-dependencies
