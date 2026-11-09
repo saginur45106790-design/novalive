@@ -1,0 +1,88 @@
+name: Build NovaLive Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - 'scripts/ensure_android_release.py'
+      - '.github/workflows/build-novalive.yml'
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Preserve source Android Manifest
+        run: |
+          cp mobile/android/app/src/main/AndroidManifest.xml /tmp/novalive-main-manifest.xml
+
+      - name: Generate Android project files
+        run: flutter create --platforms=android --org com.novalive mobile
+
+      - name: Restore release permissions and brand icon
+        run: |
+          # flutter create can regenerate AndroidManifest.xml. Restore the saved source first.
+          cp /tmp/novalive-main-manifest.xml mobile/android/app/src/main/AndroidManifest.xml
+          # Full v2 update adds this stronger, repeatable XML repair script.
+          if [[ -f scripts/ensure_android_release.py ]]; then
+            python3 scripts/ensure_android_release.py mobile/android/app/src/main/AndroidManifest.xml
+          fi
+          grep -q 'android.permission.INTERNET' mobile/android/app/src/main/AndroidManifest.xml || { echo 'Missing INTERNET permission in source manifest'; exit 1; }
+          # Optional branded icons: no failure if the icon files were not uploaded yet.
+          for folder in mobile/branding/mipmap-*; do
+            if [[ -f "$folder/ic_launcher.png" ]]; then
+              mkdir -p "mobile/android/app/src/main/res/$(basename "$folder")"
+              cp "$folder/ic_launcher.png" "mobile/android/app/src/main/res/$(basename "$folder")/ic_launcher.png"
+            fi
+          done
+
+      - name: Install Flutter packages
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Build signed-for-local-install release APK
+        working-directory: mobile
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [[ "$API_BASE_URL" != https://* ]]; then
+            echo 'Set Settings > Secrets and variables > Actions > Variables > API_BASE_URL'
+            exit 1
+          fi
+          flutter build apk --release --dart-define="API_BASE_URL=$API_BASE_URL"
+
+      - name: Verify permission inside FINAL APK
+        run: |
+          APK=mobile/build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          AAPT=$(find "$SDK/build-tools" -type f -name aapt | sort -V | tail -n 1)
+          if [[ -z "$AAPT" ]]; then
+            echo 'Android aapt not found: cannot certify merged APK permission'
+            exit 1
+          fi
+          "$AAPT" dump permissions "$APK" | tee /tmp/novalive-permissions.txt
+          grep -q 'android.permission.INTERNET' /tmp/novalive-permissions.txt || { echo 'FATAL: FINAL APK has no INTERNET permission'; exit 1; }
+          grep -q 'android.permission.CAMERA' /tmp/novalive-permissions.txt || { echo 'FATAL: FINAL APK has no CAMERA permission'; exit 1; }
+          grep -q 'android.permission.RECORD_AUDIO' /tmp/novalive-permissions.txt || { echo 'FATAL: FINAL APK has no RECORD_AUDIO permission'; exit 1; }
+          echo 'Verified real APK permissions: INTERNET, CAMERA, MICROPHONE'
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NovaLive-Android-APK-v2
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 15
