@@ -1,5 +1,5 @@
 name: novalive
-version: 1.0.0+1
+version: 1.1.0+2
 description: NovaLive Android social video chat client
 publish_to: none
 environment:
