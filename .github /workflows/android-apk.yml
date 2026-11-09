@@ -1,0 +1,36 @@
+name: Build Android APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/android-apk.yml'
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      API_BASE_URL: ${{ vars.API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android project files
+        run: flutter create --platforms=android --org com.novalive mobile
+      - name: Install packages
+        working-directory: mobile
+        run: flutter pub get
+      - name: Build release APK
+        working-directory: mobile
+        run: |
+          if [[ "$API_BASE_URL" != https://* ]]; then
+            echo 'Set repository Variables > API_BASE_URL to deployed HTTPS backend URL'; exit 1
+          fi
+          flutter build apk --release --dart-define="API_BASE_URL=$API_BASE_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NovaLive-Android-APK
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 15
