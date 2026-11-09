@@ -1,0 +1,20 @@
+name: novalive
+version: 1.0.0+1
+description: NovaLive Android social video chat client
+publish_to: none
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.3.0
+  flutter_secure_storage: ^9.2.4
+  livekit_client: ^2.13.2
+  permission_handler: ^12.0.1
+  intl: ^0.20.2
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true
