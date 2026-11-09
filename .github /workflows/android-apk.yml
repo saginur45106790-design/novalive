@@ -34,3 +34,4 @@ jobs:
           name: NovaLive-Android-APK
           path: mobile/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 15
+          # Retrigger NovaLive Android build
