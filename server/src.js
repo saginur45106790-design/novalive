@@ -25,6 +25,10 @@ app.use('/api',api);
 app.use('/admin',express.static('public',{index:'index.html'}));
 app.get('/', (_req,res)=>res.redirect('/admin'));
 app.get('/health',(_req,res)=>res.json({ok:true,service:'novalive',time:new Date().toISOString()}));
+app.get('/health/ready', async (_req,res)=>{
+ try { await db.query('SELECT 1'); res.json({ok:true,service:'novalive',database:'reachable'}); }
+ catch (_) { res.status(503).json({ok:false,service:'novalive',database:'unavailable'}); }
+});
 const wrap = f => (req,res,next) => Promise.resolve(f(req,res,next)).catch(next);
 const fail = (code,message) => { const e = Error(message); e.status=code; throw e; };
 const str=(v,max=100)=>typeof v==='string'?v.trim().slice(0,max):'';
