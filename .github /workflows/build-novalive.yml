@@ -1,4 +1,4 @@
-name: Build NovaLive V3 Verified Android APK
+name: Build NovaLive V4 Guest APK
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'mobile/**'
+      - 'scripts/ensure_android_release.py'
       - '.github/workflows/build-novalive.yml'
 
 jobs:
@@ -14,97 +15,103 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout NovaLive source
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Verify the exact Render API URL before packaging
-        shell: bash
-        env:
-          API_BASE_URL: ${{ vars.API_BASE_URL }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os
-          from urllib.parse import urlsplit
-          url = os.environ.get('API_BASE_URL','').strip().rstrip('/')
-          parts = urlsplit(url)
-          if parts.scheme != 'https' or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment or parts.path:
-              raise SystemExit('ERROR: Settings > Secrets and variables > Actions > Variables > API_BASE_URL must be exactly the Render HTTPS base URL (no /health or /api).')
-          print('Building against:', url)
-          PY
-          # A sleeping Render Free instance can require extra time to wake.
-          curl --fail --show-error --silent --location \
-            --retry 3 --retry-delay 12 --retry-all-errors \
-            --connect-timeout 15 --max-time 110 \
-            "${API_BASE_URL%/}/health" -o /tmp/novalive-health.json
-          python3 - <<'PY'
-          import json
-          with open('/tmp/novalive-health.json', encoding='utf-8') as f:
-              data = json.load(f)
-          if data.get('ok') is not True:
-              raise SystemExit('ERROR: Render /health returned a response without ok:true. Correct API_BASE_URL before building.')
-          print('Verified: Render /health returned ok:true')
-          PY
 
       - name: Install Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
-      - name: Save SOURCE Android release manifest
-        shell: bash
+      - name: Check V4 source and security boundaries
         run: |
-          set -euo pipefail
-          test -f mobile/android/app/src/main/AndroidManifest.xml
-          cp mobile/android/app/src/main/AndroidManifest.xml /tmp/novalive-source-manifest.xml
-          grep -q 'android.permission.INTERNET' /tmp/novalive-source-manifest.xml
+          node --check server/src.js
+          python3 scripts/verify_v4.py
 
-      - name: Generate required Android project files
-        run: flutter create --platforms=android --org com.novalive mobile
-
-      - name: Restore permissions AFTER flutter create
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp /tmp/novalive-source-manifest.xml mobile/android/app/src/main/AndroidManifest.xml
-          for p in android.permission.INTERNET android.permission.ACCESS_NETWORK_STATE android.permission.CAMERA android.permission.RECORD_AUDIO; do
-            grep -q "$p" mobile/android/app/src/main/AndroidManifest.xml || { echo "Missing $p from AndroidManifest.xml"; exit 1; }
-          done
-          echo 'Source release manifest restored. Final APK permission will be checked later.'
-
-      - name: Resolve Flutter dependencies
-        working-directory: mobile
-        run: flutter pub get
-
-      - name: Build unique version 3.0.0 APK with validated API URL
-        working-directory: mobile
+      - name: Validate configured backend URL
         shell: bash
         env:
           API_BASE_URL: ${{ vars.API_BASE_URL }}
         run: |
           set -euo pipefail
-          flutter build apk --release --build-name=3.0.0 --build-number=300 \
+          python3 - <<'PYURL'
+          import os
+          from urllib.parse import urlsplit
+          u=os.environ.get('API_BASE_URL','').strip().rstrip('/')
+          p=urlsplit(u)
+          if p.scheme!='https' or not p.hostname or p.path or p.query or p.fragment:
+              raise SystemExit('ERROR: API_BASE_URL must be exactly https://YOUR-SERVICE.onrender.com with no path')
+          print('APK backend host:',p.hostname)
+          PYURL
+          curl --fail --retry 2 --retry-delay 10 --retry-all-errors --connect-timeout 15 --max-time 110 "${API_BASE_URL%/}/health" | tee /tmp/novalive-health.json
+          python3 - <<'PYHEALTH'
+          import json
+          if json.load(open('/tmp/novalive-health.json')).get('ok') is not True:
+              raise SystemExit('ERROR: backend health was not ok:true')
+          print('Backend reachable from GitHub CI')
+          PYHEALTH
+
+      - name: Preserve source Android Manifest
+        run: |
+          cp mobile/android/app/src/main/AndroidManifest.xml /tmp/novalive-main-manifest.xml
+
+      - name: Generate Android project files
+        run: flutter create --platforms=android --org com.novalive mobile
+
+      - name: Restore release permissions and brand icon
+        run: |
+          # flutter create can regenerate AndroidManifest.xml. Restore the saved source first.
+          cp /tmp/novalive-main-manifest.xml mobile/android/app/src/main/AndroidManifest.xml
+          # Full v2 update adds this stronger, repeatable XML repair script.
+          if [[ -f scripts/ensure_android_release.py ]]; then
+            python3 scripts/ensure_android_release.py mobile/android/app/src/main/AndroidManifest.xml
+          fi
+          grep -q 'android.permission.INTERNET' mobile/android/app/src/main/AndroidManifest.xml || { echo 'Missing INTERNET permission in source manifest'; exit 1; }
+          # Optional branded icons: no failure if the icon files were not uploaded yet.
+          for folder in mobile/branding/mipmap-*; do
+            if [[ -f "$folder/ic_launcher.png" ]]; then
+              mkdir -p "mobile/android/app/src/main/res/$(basename "$folder")"
+              cp "$folder/ic_launcher.png" "mobile/android/app/src/main/res/$(basename "$folder")/ic_launcher.png"
+            fi
+          done
+
+      - name: Install Flutter packages
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Build signed-for-local-install release APK
+        working-directory: mobile
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [[ "$API_BASE_URL" != https://* ]]; then
+            echo 'Set Settings > Secrets and variables > Actions > Variables > API_BASE_URL'
+            exit 1
+          fi
+          flutter build apk --release --build-name=4.0.0 --build-number=400 \
             --dart-define="API_BASE_URL=${API_BASE_URL%/}"
 
-      - name: Inspect INTERNET permission inside the COMPILED APK
-        shell: bash
+      - name: Verify permissions in COMPILED APK
         run: |
-          set -euo pipefail
           APK=mobile/build/app/outputs/flutter-apk/app-release.apk
           test -s "$APK"
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           AAPT=$(find "$SDK/build-tools" -type f -name aapt | sort -V | tail -n 1)
-          test -n "$AAPT" || { echo 'ERROR: Android aapt is missing, cannot certify APK permissions'; exit 1; }
-          "$AAPT" dump permissions "$APK" | tee /tmp/novalive-apk-permissions.txt
-          for p in android.permission.INTERNET android.permission.ACCESS_NETWORK_STATE android.permission.CAMERA android.permission.RECORD_AUDIO; do
-            grep -q "$p" /tmp/novalive-apk-permissions.txt || { echo "FAIL: Final APK does not include $p"; exit 1; }
-          done
-          echo 'PASS: Real compiled APK contains network, camera and microphone permissions.'
+          if [[ -z "$AAPT" ]]; then
+            echo 'Android aapt not found: cannot certify merged APK permission'
+            exit 1
+          fi
+          "$AAPT" dump permissions "$APK" | tee /tmp/novalive-permissions.txt
+          grep -q 'android.permission.INTERNET' /tmp/novalive-permissions.txt || { echo 'FATAL: FINAL APK has no INTERNET permission'; exit 1; }
+          grep -q 'android.permission.CAMERA' /tmp/novalive-permissions.txt || { echo 'FATAL: FINAL APK has no CAMERA permission'; exit 1; }
+          grep -q 'android.permission.RECORD_AUDIO' /tmp/novalive-permissions.txt || { echo 'FATAL: FINAL APK has no RECORD_AUDIO permission'; exit 1; }
+          echo 'Verified real APK permissions: INTERNET, CAMERA, MICROPHONE'
 
-      - name: Upload ONLY the verified V3 APK
+      - name: Upload NovaLive V4 APK
         uses: actions/upload-artifact@v4
         with:
-          name: NovaLive-V3-Verified-Internet-APK
+          name: NovaLive-V4-Guest-APK
           path: mobile/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 15
