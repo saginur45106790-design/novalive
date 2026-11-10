@@ -9,9 +9,10 @@ class VideoRoomScreen extends StatefulWidget {
   final String title;
   final String tokenEndpoint;
   final bool publish;
+  final bool guest;
   final String? callId;
   final String? ownedRoomId;
-  const VideoRoomScreen({super.key,required this.api,required this.title,required this.tokenEndpoint,this.publish=true,this.callId,this.ownedRoomId});
+  const VideoRoomScreen({super.key,required this.api,required this.title,required this.tokenEndpoint,this.publish=true,this.guest=false,this.callId,this.ownedRoomId});
   @override State<VideoRoomScreen> createState()=>_VideoRoomScreenState();
 }
 class _VideoRoomScreenState extends State<VideoRoomScreen> {
@@ -26,7 +27,7 @@ class _VideoRoomScreenState extends State<VideoRoomScreen> {
         final permissions=await [Permission.camera,Permission.microphone].request();
         if(permissions.values.any((p)=>!p.isGranted))throw Exception('Camera and microphone permission required');
       }
-      final data=await widget.api.post(widget.tokenEndpoint,{});
+      final data=await widget.api.post(widget.tokenEndpoint,{},public:widget.guest);
       await room.connect(data['url'] as String,data['token'] as String,roomOptions:const RoomOptions(adaptiveStream:true,dynacast:true));
       if(widget.publish){
         await room.localParticipant!.setMicrophoneEnabled(true);

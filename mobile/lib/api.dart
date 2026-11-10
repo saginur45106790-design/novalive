@@ -25,14 +25,13 @@ class ServerReport {
 class Api {
   // This URL is inserted by the GitHub Actions workflow when building the APK.
   static const configuredBase = String.fromEnvironment(
-    'API_BASE_URL', defaultValue: 'https://YOUR-RENDER-SERVICE.onrender.com');
+    'API_BASE_URL', defaultValue: '');
   static String get base => configuredBase.trim().replaceFirst(RegExp(r'/+$'), '');
   static const storage = FlutterSecureStorage();
   String? _token;
   String? get token => _token;
 
   bool get hasValidUrl => base.startsWith('https://') &&
-      !base.contains('YOUR-RENDER-SERVICE') &&
       Uri.tryParse(base)?.host.isNotEmpty == true;
 
   // Health is publicly accessible and is intentionally independent of login.
@@ -111,6 +110,7 @@ class Api {
   }
 
   Future<Map<String,dynamic>> get(String path) => _request('GET', path);
+  Future<Map<String,dynamic>> publicGet(String path) => _request('GET', path, public:true);
   Future<Map<String,dynamic>> post(String path, Map<String,dynamic> body,
       {bool public = false}) => _request('POST', path, body: body, public: public);
   Future<Map<String,dynamic>> patch(String path, Map<String,dynamic> body) =>

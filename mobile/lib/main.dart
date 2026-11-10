@@ -3,16 +3,43 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'room_screen.dart';
 import 'network_status_screen.dart';
+import 'guest_shell.dart';
 
 const bg=Color(0xff0B1020),panel=Color(0xff18213A),purple=Color(0xff8556F5),cyan=Color(0xff18D0E4);
 void main(){WidgetsFlutterBinding.ensureInitialized();runApp(const NovaLive());}
 class NovaLive extends StatefulWidget{const NovaLive({super.key});@override State<NovaLive>createState()=>_NovaLiveState();}
 class _NovaLiveState extends State<NovaLive>{
- final api=Api();bool pending=true,authenticated=false;
+ final api=Api();
+ final navigatorKey=GlobalKey<NavigatorState>();
+ bool authenticated=false;
  @override void initState(){super.initState();_restore();}
- Future<void>_restore()async{final ok=await api.restore();if(mounted)setState((){pending=false;authenticated=ok;});}
- @override Widget build(BuildContext context)=>MaterialApp(title:'NovaLive',debugShowCheckedModeBanner:false,theme:ThemeData(brightness:Brightness.dark,scaffoldBackgroundColor:bg,colorScheme:ColorScheme.fromSeed(seedColor:purple,brightness:Brightness.dark),useMaterial3:true,appBarTheme:const AppBarTheme(backgroundColor:bg,centerTitle:false),inputDecorationTheme:InputDecorationTheme(filled:true,fillColor:panel,border:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:BorderSide.none),contentPadding:const EdgeInsets.symmetric(horizontal:16,vertical:17)),cardTheme:CardThemeData(color:panel,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(19))),elevatedButtonTheme:ElevatedButtonThemeData(style:ElevatedButton.styleFrom(backgroundColor:purple,foregroundColor:Colors.white,padding:const EdgeInsets.symmetric(vertical:15,horizontal:24),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(16))))),home:pending?const Scaffold(body:Center(child:CircularProgressIndicator())):authenticated?MainShell(api:api,onLogout:()async{await api.logout();setState(()=>authenticated=false);}):AuthScreen(api:api,onSuccess:()=>setState(()=>authenticated=true)));
+ Future<void> _restore() async {
+   // Guests can explore immediately, even if Render is asleep.
+   final ok=await api.restore();
+   if(mounted && ok)setState(()=>authenticated=true);
+ }
+ void _openAuth(){
+   navigatorKey.currentState?.push(MaterialPageRoute(
+     builder:(screenContext)=>AuthScreen(api:api,onSuccess:(){
+       navigatorKey.currentState?.pop();
+       if(mounted)setState(()=>authenticated=true);
+     }),
+   ));
+ }
+ @override Widget build(BuildContext context)=>MaterialApp(
+  title:'NovaLive',navigatorKey:navigatorKey,debugShowCheckedModeBanner:false,
+  theme:ThemeData(brightness:Brightness.dark,scaffoldBackgroundColor:bg,
+   colorScheme:ColorScheme.fromSeed(seedColor:purple,brightness:Brightness.dark),useMaterial3:true,
+   appBarTheme:const AppBarTheme(backgroundColor:bg,centerTitle:false),
+   inputDecorationTheme:InputDecorationTheme(filled:true,fillColor:panel,border:OutlineInputBorder(borderRadius:BorderRadius.circular(15),borderSide:BorderSide.none),contentPadding:const EdgeInsets.symmetric(horizontal:16,vertical:17)),
+   cardTheme:CardThemeData(color:panel,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(19))),
+   elevatedButtonTheme:ElevatedButtonThemeData(style:ElevatedButton.styleFrom(backgroundColor:purple,foregroundColor:Colors.white,padding:const EdgeInsets.symmetric(vertical:15,horizontal:24),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(16))))),
+  home: authenticated
+     ? MainShell(api:api,onLogout:()async{await api.logout();if(mounted)setState(()=>authenticated=false);})
+     : GuestShell(api:api,onSignIn:_openAuth),
+ );
 }
+
 void errorToast(BuildContext context,Object e){ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('$e'),backgroundColor:const Color(0xffA43F55)));}
 Widget gradientAvatar(String name,{double size=62})=>Container(width:size,height:size,decoration:const BoxDecoration(shape:BoxShape.circle,gradient:LinearGradient(colors:[purple,cyan],begin:Alignment.topLeft,end:Alignment.bottomRight)),child:Center(child:Text(name.isEmpty?'?':name.substring(0,1).toUpperCase(),style:TextStyle(color:Colors.white,fontSize:size*.42,fontWeight:FontWeight.bold))));
 Widget fullButton(String text,VoidCallback fn,{IconData icon=Icons.arrow_forward_rounded})=>SizedBox(width:double.infinity,child:ElevatedButton.icon(onPressed:fn,icon:Icon(icon),label:Text(text)));
@@ -44,7 +71,7 @@ class _AuthScreenState extends State<AuthScreen>{
   TextField(controller:password,obscureText:true,decoration:const InputDecoration(labelText:'Password (10+ characters)')),const SizedBox(height:10),
   if(register)CheckboxListTile(value:adult,onChanged:(v)=>setState(()=>adult=v??false),title:const Text('I confirm I am 18 or older',style:TextStyle(fontSize:14)),controlAffinity:ListTileControlAffinity.leading,contentPadding:EdgeInsets.zero),const SizedBox(height:12),
   fullButton(busy?'Connecting...':register?'Create account':'Sign in',busy?(){}:submit),const SizedBox(height:12),TextButton(onPressed:()=>setState(()=>register=!register),child:Text(register?'Already have an account? Sign in':'New here? Create an account')),const SizedBox(height:8),OutlinedButton.icon(onPressed:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>NetworkStatusScreen(api:widget.api))),icon:const Icon(Icons.wifi_find),label:const Text('Server Connection Test')),
-  const SizedBox(height:8),const Text('Community standards: consent, respect, and zero tolerance for harassment.',textAlign:TextAlign.center,style:TextStyle(color:Colors.white54,fontSize:12))
+  const SizedBox(height:8),TextButton.icon(onPressed:()=>Navigator.maybePop(context),icon:const Icon(Icons.explore_outlined),label:const Text('Explore without an account')),const SizedBox(height:8),const Text('Community standards: consent, respect, and zero tolerance for harassment.',textAlign:TextAlign.center,style:TextStyle(color:Colors.white54,fontSize:12))
  ]))))));
 }
 class MainShell extends StatefulWidget{final Api api;final Future<void> Function() onLogout;const MainShell({super.key,required this.api,required this.onLogout});@override State<MainShell>createState()=>_MainShellState();}
