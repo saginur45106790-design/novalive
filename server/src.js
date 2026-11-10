@@ -72,6 +72,33 @@ api.post('/auth/login',authLimit,wrap(async(req,res)=>{
  if(!q.rowCount||typeof password!=='string'||!await bcrypt.compare(password,q.rows[0].password_hash)||q.rows[0].suspended) return fail(401,'Invalid credentials');
  const u=q.rows[0];res.json({user:{id:u.id,name:u.name,email:u.email,role:u.role,coins:u.coins,earnings:u.earnings,bio:u.bio},token:jwt.sign({sub:u.id},process.env.JWT_SECRET,{expiresIn:'7d',algorithm:'HS256'})});
 }));
+
+// Browse before login. No email, wallet, phone, location or private account fields are exposed.
+// Public hosts are only accounts individually promoted to 'host' by an administrator.
+const publicBrowseLimit=rateLimit({windowMs:60_000,limit:45,standardHeaders:'draft-7',legacyHeaders:false});
+const guestWatchLimit=rateLimit({windowMs:10*60_000,limit:18,standardHeaders:'draft-7',legacyHeaders:false});
+api.get('/public/discover',publicBrowseLimit,wrap(async(_req,res)=>{
+  res.set('Cache-Control','no-store');
+  const [hosts,rooms]=await Promise.all([
+    db.query("SELECT id,name,bio FROM users WHERE role='host' AND suspended=false ORDER BY created_at DESC LIMIT 30"),
+    db.query("SELECT r.id,r.title,u.name AS owner_name FROM rooms r JOIN users u ON r.owner_id=u.id WHERE r.status='active' AND r.kind='live' AND u.suspended=false AND u.role='host' ORDER BY r.created_at DESC LIMIT 40")
+  ]);
+  res.json({hosts:hosts.rows,rooms:rooms.rows});
+}));
+// Guest can ONLY subscribe to a public live room. Never allow camera, mic, data or call access.
+api.post('/public/rooms/:id/watch',guestWatchLimit,wrap(async(req,res)=>{
+  if(!isUUID(req.params.id))return fail(400,'Invalid room');
+  const q=await db.query("SELECT r.id FROM rooms r JOIN users u ON r.owner_id=u.id WHERE r.id=$1 AND r.kind='live' AND r.status='active' AND u.suspended=false AND u.role='host'",[req.params.id]);
+  if(!q.rowCount)return fail(404,'Public live room unavailable');
+  const token=new AccessToken(process.env.LIVEKIT_API_KEY,process.env.LIVEKIT_API_SECRET,{
+    identity:`guest-${crypto.randomUUID()}`,ttl:'30m'
+  });
+  token.addGrant({room:roomName(q.rows[0].id),roomJoin:true,roomCreate:false,
+    canPublish:false,canSubscribe:true,canPublishData:false});
+  res.set('Cache-Control','no-store');
+  res.json({url:process.env.LIVEKIT_URL,token:await token.toJwt()});
+}));
+
 api.use(actor);
 api.get('/me',(req,res)=>res.json({user:req.user}));
 api.patch('/me',wrap(async(req,res)=>{
